@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon
+  id="inputstream.smoothstream"
+  version="1.0.0"
+  name="InputStream SmoothStreamingMedia"
+  provider-name="peak3d">
+  <requires>
+    <import addon="kodi.inputstream" version="1.0.0"/>
+  </requires>
+  <extension
+    point="kodi.inputstream"
+    name="smoothstream"
+    extension=".ism"
+    tags="true"
+    listitemprops="license_type|license_key"
+    library_@PLATFORM@="@LIBRARY_FILENAME@"/>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en">InputStream Client for SmoothStreamingMedia files</summary>
+    <description lang="en">InputStream Client for SmoothStreamingMedia files</description>
+    <platform>@PLATFORM@</platform>
+  </extension>
+</addon>
