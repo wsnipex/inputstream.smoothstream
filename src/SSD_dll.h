@@ -13,22 +13,26 @@ public:
     OPTION_PROTOCOL,
     OPTION_HEADER
   };
+  static const uint32_t version = 1;
 
   virtual const char *GetDecrypterPath() const = 0;
+  virtual const char *GetProfilePath() const = 0;
+  virtual const char *GetHexDomain() const = 0;
   virtual void* CURLCreate(const char* strURL) = 0;
   virtual bool CURLAddOption(void* file, CURLOPTIONS opt, const char* name, const char * value) = 0;
   virtual bool CURLOpen(void* file, CURLFLAGS flags) = 0;
   virtual size_t ReadFile(void* file, void* lpBuf, size_t uiBufSize) = 0;
   virtual size_t WriteFile(void* file, const void* lpBuf, size_t uiBufSize) = 0;
   virtual void CloseFile(void* file) = 0;
-  
+  virtual bool CreateDirectory(const char *dir) = 0;
+
   enum LOGLEVEL
   {
     LL_DEBUG,
     LL_INFO,
     LL_ERROR
   };
-  
+
   virtual void Log(LOGLEVEL level, const char *msg) = 0;
 };
 

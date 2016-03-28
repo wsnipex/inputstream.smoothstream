@@ -44,6 +44,16 @@ public:
     return m_strDecrypterPath.c_str();
   };
 
+  virtual const char *GetProfilePath() const override
+  {
+    return m_strProfilePath.c_str();
+  };
+
+  virtual const char *GetHexDomain() const override
+  {
+    return m_strHexDomain.c_str();
+  };
+
   virtual void* CURLCreate(const char* strURL) override
   {
     return xbmc->CURLCreate(strURL);
@@ -51,10 +61,10 @@ public:
 
   virtual bool CURLAddOption(void* file, CURLOPTIONS opt, const char* name, const char * value)override
   {
-    const XFILE::CURLOPTIONTYPE xbmcmap[] = {XFILE::CURL_OPTION_PROTOCOL, XFILE::CURL_OPTION_HEADER};
+    const XFILE::CURLOPTIONTYPE xbmcmap[] = { XFILE::CURL_OPTION_PROTOCOL, XFILE::CURL_OPTION_HEADER };
     return xbmc->CURLAddOption(file, xbmcmap[opt], name, value);
   }
-  
+
   virtual bool CURLOpen(void* file, CURLFLAGS flags)override
   {
     return xbmc->CURLOpen(file, XFILE::READ_NO_CACHE | (flags ? XFILE::READ_AFTER_WRITE : 0));
@@ -69,10 +79,15 @@ public:
   {
     return xbmc->WriteFile(file, lpBuf, uiBufSize);
   };
-  
+
   virtual void CloseFile(void* file)override
   {
     return xbmc->CloseFile(file);
+  };
+
+  virtual bool CreateDirectory(const char *dir)override
+  {
+    return xbmc->CreateDirectory(dir);
   };
 
   virtual void Log(LOGLEVEL level, const char *msg)override
@@ -81,21 +96,38 @@ public:
     return xbmc->Log(xbmcmap[level], msg);
   };
 
-  void SetAddonPath(const char *addonPath)
+  void SetAddonPaths(const char *addonPath, const char *profilePath, const char *hexDomain)
   {
     m_strDecrypterPath = addonPath;
+    m_strProfilePath = profilePath;
+    m_strHexDomain = hexDomain;
 
     const char *pathSep(addonPath[0] && addonPath[1] == ':' && isalpha(addonPath[0]) ? "\\" : "/");
 
     if (m_strDecrypterPath.size() && m_strDecrypterPath.back() != pathSep[0])
       m_strDecrypterPath += pathSep;
 
+    if (m_strProfilePath.size() && m_strProfilePath.back() != pathSep[0])
+      m_strProfilePath += pathSep;
+
+    //let us make cdm userdata out of the addonpath and share them between addons
+    m_strProfilePath.resize(m_strProfilePath.find_last_of(pathSep[0], m_strProfilePath.length()-2));
+    m_strProfilePath.resize(m_strProfilePath.find_last_of(pathSep[0], m_strProfilePath.length()-1)+1);
+
+    xbmc->CreateDirectory(m_strProfilePath.c_str());
+    m_strProfilePath += "cdm";
+    m_strProfilePath += pathSep;
+    xbmc->CreateDirectory(m_strProfilePath.c_str());
+
+    if (m_strHexDomain.size() && m_strHexDomain.back() != pathSep[0])
+      m_strHexDomain += pathSep;
+
     m_strDecrypterPath += "decrypter";
     m_strDecrypterPath += pathSep;
   }
 
 private:
-  std::string m_strDecrypterPath;
+  std::string m_strDecrypterPath, m_strProfilePath, m_strHexDomain;
 
 }kodihost;
 
@@ -200,189 +232,6 @@ bool KodiDASHStream::download(const char* url)
 }
 
 /*******************************************************
-|   CodecHandler
-********************************************************/
-
-class CodecHandler
-{
-public:
-  CodecHandler(AP4_SampleDescription *sd)
-    : sample_description(sd)
-    , extra_data(0)
-    , extra_data_size(0)
-    , naluLengthSize(0)
-    , pictureId(0)
-    , pictureIdPrev(0)
-  {};
-  virtual void UpdatePPSId(AP4_DataBuffer const&){};
-  virtual bool GetVideoInformation(unsigned int &width, unsigned int &height){ return false; };
-  virtual bool GetAudioInformation(unsigned int &channels){ return false; };
-
-  AP4_SampleDescription *sample_description;
-  const AP4_UI08 *extra_data;
-  AP4_Size extra_data_size;
-  AP4_UI08 naluLengthSize;
-  AP4_UI08 pictureId, pictureIdPrev;
-};
-
-/***********************   AVC   ************************/
-
-class AVCCodecHandler : public CodecHandler
-{
-public:
-  AVCCodecHandler(AP4_SampleDescription *sd)
-    : CodecHandler(sd)
-    , countPictureSetIds(0)
-  {
-    unsigned int width(0), height(0);
-    if (AP4_VideoSampleDescription *video_sample_description = AP4_DYNAMIC_CAST(AP4_VideoSampleDescription, sample_description))
-    {
-      width = video_sample_description->GetWidth();
-      height = video_sample_description->GetHeight();
-    }
-    if (AP4_AvcSampleDescription *avc = AP4_DYNAMIC_CAST(AP4_AvcSampleDescription, sample_description))
-    {
-      extra_data_size = avc->GetRawBytes().GetDataSize();
-      extra_data = avc->GetRawBytes().GetData();
-      countPictureSetIds = avc->GetPictureParameters().ItemCount();
-      if (countPictureSetIds > 1 || !width || !height)
-        naluLengthSize = avc->GetNaluLengthSize();
-    }
-  }
-
-  virtual void UpdatePPSId(AP4_DataBuffer const &buffer) override
-  {
-    //Search the Slice header NALU
-    const AP4_UI08 *data(buffer.GetData());
-    unsigned int data_size(buffer.GetDataSize());
-    for (; data_size;)
-    {
-      // sanity check
-      if (data_size < naluLengthSize)
-        break;
-
-      // get the next NAL unit
-      AP4_UI32 nalu_size;
-      switch (naluLengthSize) {
-      case 1:nalu_size = *data++; data_size--; break;
-      case 2:nalu_size = AP4_BytesToInt16BE(data); data += 2; data_size -= 2; break;
-      case 4:nalu_size = AP4_BytesToInt32BE(data); data += 4; data_size -= 4; break;
-      default: data_size = 0; nalu_size = 1; break;
-      }
-      if (nalu_size > data_size)
-        break;
-
-      // Stop further NALU processing
-      if (countPictureSetIds < 2)
-        naluLengthSize = 0;
-
-      unsigned int nal_unit_type = *data & 0x1F;
-
-      if (
-        //nal_unit_type == AP4_AVC_NAL_UNIT_TYPE_CODED_SLICE_OF_NON_IDR_PICTURE ||
-        nal_unit_type == AP4_AVC_NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE //||
-        //nal_unit_type == AP4_AVC_NAL_UNIT_TYPE_CODED_SLICE_DATA_PARTITION_A ||
-        //nal_unit_type == AP4_AVC_NAL_UNIT_TYPE_CODED_SLICE_DATA_PARTITION_B ||
-        //nal_unit_type == AP4_AVC_NAL_UNIT_TYPE_CODED_SLICE_DATA_PARTITION_C
-      ) {
-
-        AP4_DataBuffer unescaped(data, data_size);
-        AP4_NalParser::Unescape(unescaped);
-        AP4_BitReader bits(unescaped.GetData(), unescaped.GetDataSize());
-
-        bits.SkipBits(8); // NAL Unit Type
-
-        AP4_AvcFrameParser::ReadGolomb(bits); // first_mb_in_slice
-        AP4_AvcFrameParser::ReadGolomb(bits); // slice_type
-        pictureId = AP4_AvcFrameParser::ReadGolomb(bits); //picture_set_id
-      }
-      // move to the next NAL unit
-      data += nalu_size;
-      data_size -= nalu_size;
-    }
-  }
-
-  virtual bool GetVideoInformation(unsigned int &width, unsigned int &height) override
-  {
-    if (pictureId == pictureIdPrev)
-      return false;
-    pictureIdPrev = pictureId;
-
-    if (AP4_AvcSampleDescription *avc = AP4_DYNAMIC_CAST(AP4_AvcSampleDescription, sample_description))
-    {
-      AP4_Array<AP4_DataBuffer>& buffer = avc->GetPictureParameters();
-      AP4_AvcPictureParameterSet pps;
-      for (unsigned int i(0); i < buffer.ItemCount(); ++i)
-      {
-        if (AP4_SUCCEEDED(AP4_AvcFrameParser::ParsePPS(buffer[i].GetData(), buffer[i].GetDataSize(), pps)) && pps.pic_parameter_set_id == pictureId)
-        {
-          buffer = avc->GetSequenceParameters();
-          AP4_AvcSequenceParameterSet sps;
-          for (unsigned int i(0); i < buffer.ItemCount(); ++i)
-          {
-            if (AP4_SUCCEEDED(AP4_AvcFrameParser::ParseSPS(buffer[i].GetData(), buffer[i].GetDataSize(), sps)) && sps.seq_parameter_set_id == pps.seq_parameter_set_id)
-            {
-              sps.GetInfo(width, height);
-              return true;
-            }
-          }
-          break;
-        }
-      }
-    }
-    return false;
-  };
-private:
-  unsigned int countPictureSetIds;
-};
-
-/***********************   HEVC   ************************/
-
-class HEVCCodecHandler : public CodecHandler
-{
-public:
-  HEVCCodecHandler(AP4_SampleDescription *sd)
-    :CodecHandler(sd)
-  {
-    if (AP4_HevcSampleDescription *hevc = AP4_DYNAMIC_CAST(AP4_HevcSampleDescription, sample_description))
-    {
-      extra_data_size = hevc->GetRawBytes().GetDataSize();
-      extra_data = hevc->GetRawBytes().GetData();
-      naluLengthSize = hevc->GetNaluLengthSize();
-    }
-  }
-};
-
-/***********************   MPEG   ************************/
-
-class MPEGCodecHandler : public CodecHandler
-{
-public:
-  MPEGCodecHandler(AP4_SampleDescription *sd)
-    :CodecHandler(sd)
-  {
-    if (AP4_MpegSampleDescription *aac = AP4_DYNAMIC_CAST(AP4_MpegSampleDescription, sample_description))
-    {
-      extra_data_size = aac->GetDecoderInfo().GetDataSize();
-      extra_data = aac->GetDecoderInfo().GetData();
-    }
-  }
-
-
-  virtual bool GetAudioInformation(unsigned int &channels)
-  {
-    AP4_AudioSampleDescription *mpeg = AP4_DYNAMIC_CAST(AP4_AudioSampleDescription, sample_description);
-    if (mpeg != nullptr && mpeg->GetChannelCount() != channels)
-    {
-      channels = mpeg->GetChannelCount();
-      return true;
-    }
-    return false;
-  }
-};
-
-
-/*******************************************************
 |   FragmentedSampleReader
 ********************************************************/
 class FragmentedSampleReader : public AP4_LinearReader
@@ -400,41 +249,17 @@ public:
     , m_SingleSampleDecryptor(ssd)
     , m_Decrypter(0)
     , m_Protected_desc(0)
-    , m_codecHandler(0)
   {
     EnableTrack(m_Track->GetId());
 
     AP4_SampleDescription *desc(m_Track->GetSampleDescription(0));
     if (desc->GetType() == AP4_SampleDescription::TYPE_PROTECTED)
-    {
       m_Protected_desc = static_cast<AP4_ProtectedSampleDescription*>(desc);
-      desc = m_Protected_desc->GetOriginalSampleDescription();
-    }
-    switch (desc->GetFormat())
-    {
-    case AP4_SAMPLE_FORMAT_AVC1:
-    case AP4_SAMPLE_FORMAT_AVC2:
-    case AP4_SAMPLE_FORMAT_AVC3:
-    case AP4_SAMPLE_FORMAT_AVC4:
-      m_codecHandler = new AVCCodecHandler(desc);
-      break;
-    case AP4_SAMPLE_FORMAT_HEV1:
-    case AP4_SAMPLE_FORMAT_HVC1:
-      m_codecHandler = new HEVCCodecHandler(desc);
-      break;
-    case AP4_SAMPLE_FORMAT_MP4A:
-      m_codecHandler = new MPEGCodecHandler(desc);
-      break;
-    default:
-      m_codecHandler = new CodecHandler(desc);
-      break;
-    }
   }
 
   ~FragmentedSampleReader()
   {
     delete m_Decrypter;
-    delete m_codecHandler;
   }
 
   AP4_Result ReadSample()
@@ -466,8 +291,6 @@ public:
     m_dts = (double)m_sample_.GetDts() / (double)m_Track->GetMediaTimeScale();
     m_pts = (double)m_sample_.GetCts() / (double)m_Track->GetMediaTimeScale();
 
-    m_codecHandler->UpdatePPSId(m_sample_data_);
-
     return AP4_SUCCESS;
   };
 
@@ -485,10 +308,7 @@ public:
   AP4_Size GetSampleDataSize()const{ return m_sample_data_.GetDataSize(); };
   const AP4_Byte *GetSampleData()const{ return m_sample_data_.GetData(); };
   double GetDuration()const{ return (double)m_sample_.GetDuration() / (double)m_Track->GetMediaTimeScale(); };
-  const AP4_UI08 *GetExtraData(){ return m_codecHandler->extra_data; };
-  AP4_Size GetExtraDataSize(){ return m_codecHandler->extra_data_size; };
-  bool GetVideoInformation(unsigned int &width, unsigned int &height){ return  m_codecHandler->GetVideoInformation(width, height); };
-  bool GetAudioInformation(unsigned int &channelCount){ return  m_codecHandler->GetAudioInformation(channelCount); };
+
   bool TimeSeek(double pts, bool preceeding)
   {
     AP4_Ordinal sampleIndex;
@@ -540,8 +360,6 @@ private:
   AP4_Sample     m_sample_;
   AP4_DataBuffer m_encrypted, m_sample_data_;
 
-  CodecHandler *m_codecHandler;
-
   AP4_ProtectedSampleDescription *m_Protected_desc;
   AP4_CencSingleSampleDecrypter *m_SingleSampleDecryptor;
   AP4_CencSampleDecrypter *m_Decrypter;
@@ -580,10 +398,6 @@ Session::Session(const char *strURL, const char *strLicType, const char* strLicK
   int buf;
   xbmc->GetSetting("LASTBANDWIDTH", (char*)&buf);
   dashtree_.bandwidth_ = buf;
-
-  char addonpath[1024];
-  if (xbmc->GetSetting("__addonpath__", addonpath))
-    kodihost.SetAddonPath(addonpath);
 }
 
 Session::~Session()
@@ -591,7 +405,7 @@ Session::~Session()
   for (std::vector<STREAM*>::iterator b(streams_.begin()), e(streams_.end()); b != e; ++b)
     SAFE_DELETE(*b);
   streams_.clear();
-  
+
   if (decrypterModule_)
   {
     dlclose(decrypterModule_);
@@ -602,7 +416,7 @@ Session::~Session()
 
 void Session::GetSupportedDecrypterURN(std::pair<std::string, std::string> &urn)
 {
-  typedef SSD_DECRYPTER *(*CreateDecryptorInstanceFunc)(SSD_HOST *host);
+  typedef SSD_DECRYPTER *(*CreateDecryptorInstanceFunc)(SSD_HOST *host, uint32_t version);
   const char *path = kodihost.GetDecrypterPath();
 
   VFSDirEntry *items(0);
@@ -624,7 +438,7 @@ void Session::GetSupportedDecrypterURN(std::pair<std::string, std::string> &urn)
       CreateDecryptorInstanceFunc startup;
       if ((startup = (CreateDecryptorInstanceFunc)dlsym(mod, "CreateDecryptorInstance")))
       {
-        SSD_DECRYPTER *decrypter = startup(&kodihost);
+        SSD_DECRYPTER *decrypter = startup(&kodihost, SSD_HOST::version);
         const char *suppUrn(0);
 
         if (decrypter && (suppUrn = decrypter->Supported(license_type_.c_str(), license_key_.c_str())))
@@ -750,65 +564,21 @@ bool Session::initialize()
     stream.info_.m_Channels = rep->channelCount_;
     stream.info_.m_Bandwidth = rep->bandwidth_;
     strcpy(stream.info_.m_language, adp->language_.c_str());
+    stream.info_.m_ExtraData = reinterpret_cast<const uint8_t*>(rep->codec_extra_data_.data());
+    stream.info_.m_ExtraSize = rep->codec_extra_data_.size();
   }
-  
+
   // Try to initialize an SingleSampleDecryptor
   if (dashtree_.encryptionState_)
   {
     AP4_DataBuffer init_data;
 
-    if (dashtree_.adp_pssh_.second == "FILE")
-    {
-      std::string strkey(dashtree_.adp_pssh_.first.substr(9));
-      while (size_t pos = strkey.find('-') != std::string::npos)
-        strkey.erase(pos, 1);
-      if (strkey.size() != 32)
-      {
-        xbmc->Log(ADDON::LOG_ERROR, "Key system mismatch (%s)!", dashtree_.adp_pssh_.first.c_str());
-        return false;
-      }
+    const char* pssh = "";
 
-      unsigned char key_system[16];
-      AP4_ParseHex(strkey.c_str(), key_system, 16);
-
-      Session::STREAM *stream(streams_[0]);
-
-      stream->enabled = true;
-      stream->stream_.start_stream(0);
-      stream->stream_.select_stream(true);
-
-      stream->input_ = new AP4_DASHStream(&stream->stream_);
-      stream->input_file_ = new AP4_File(*stream->input_, AP4_DefaultAtomFactory::Instance, true);
-      AP4_Movie* movie = stream->input_file_->GetMovie();
-      if (movie == NULL)
-      {
-        xbmc->Log(ADDON::LOG_ERROR, "No MOOV in stream!");
-        stream->disable();
-        return false;
-      }
-      AP4_Array<AP4_PsshAtom*>& pssh = movie->GetPsshAtoms();
-
-      for (unsigned int i = 0; !init_data.GetDataSize() && i < pssh.ItemCount(); i++)
-      {
-        if (memcmp(pssh[i]->GetSystemId(), key_system, 16) == 0)
-          init_data.AppendData(pssh[i]->GetData().GetData(), pssh[i]->GetData().GetDataSize());
-      }
-
-      if (!init_data.GetDataSize())
-      {
-        xbmc->Log(ADDON::LOG_ERROR, "Could not extract license from video stream (PSSH not found)");
-        stream->disable();
-        return false;
-      }
-      stream->disable();
-    }
-    else
-    {
-      init_data.SetBufferSize(1024);
-      unsigned int init_data_size(1024);
-      b64_decode(dashtree_.pssh_.second.data(), dashtree_.pssh_.second.size(), init_data.UseData(), init_data_size);
-      init_data.SetDataSize(init_data_size);
-    }
+    init_data.SetBufferSize(1024);
+    unsigned int init_data_size(1024);
+    b64_decode(pssh, strlen(pssh), init_data.UseData(), init_data_size);
+    init_data.SetDataSize(init_data_size);
     return (single_sample_decryptor_ = CreateSingleSampleDecrypter(init_data))!=0;
   }
   return true;
@@ -824,9 +594,6 @@ FragmentedSampleReader *Session::GetNextSample()
 
   if (res)
   {
-    if (res->reader_->GetVideoInformation(res->info_.m_Width, res->info_.m_Height)
-    || res->reader_->GetAudioInformation(res->info_.m_Channels))
-      changed_ = true;
     last_pts_ = res->reader_->PTS();
     return res->reader_;
   }
@@ -972,7 +739,23 @@ extern "C" {
       }
     }
 
-    kodihost.SetAddonPath(props.m_libFolder);
+    //Build up a CDM path to store decrypter specific stuff. Each domain gets it own path
+    const char* bspos(strchr(props.m_strURL, ':'));
+    if (!bspos || bspos[1] != '/' || bspos[2] != '/' || !(bspos = strchr(bspos + 3, '/')))
+    {
+      xbmc->Log(ADDON::LOG_ERROR, "Could not find protocol inside url - invalid");
+      return false;
+    }
+    if (bspos - props.m_strURL > 256)
+    {
+      xbmc->Log(ADDON::LOG_ERROR, "length of domain exeeds max. size of 256 - invalid");
+      return false;
+    }
+    char buffer[1024];
+    buffer[(bspos - props.m_strURL) * 2] = 0;
+    AP4_FormatHex(reinterpret_cast<const uint8_t*>(props.m_strURL), bspos - props.m_strURL, buffer);
+
+    kodihost.SetAddonPaths(props.m_libFolder, props.m_profileFolder, buffer);
 
     session = new Session(props.m_strURL, lt, lk);
 
@@ -1020,7 +803,7 @@ extern "C" {
   {
     xbmc->Log(ADDON::LOG_DEBUG, "GetStreamIds()");
     INPUTSTREAM_IDS iids;
-    
+
     if(session)
     {
         iids.m_streamCount = session->GetStreamCount();
@@ -1108,10 +891,6 @@ extern "C" {
 
       stream->reader_ = new FragmentedSampleReader(stream->input_, movie, track, streamid, session->GetSingleSampleDecryptor());
 
-      // ExtraData is now available......
-      stream->info_.m_ExtraData = stream->reader_->GetExtraData();
-      stream->info_.m_ExtraSize = stream->reader_->GetExtraDataSize();
-
       // Set the session Changed to force new GetStreamInfo call from kodi -> addon
       session->CheckChange(true);
 
@@ -1119,9 +898,6 @@ extern "C" {
       ||(pts <= 0 && !AP4_SUCCEEDED(stream->reader_->ReadSample())))
         return stream->disable();
 
-      // Maybe we have changed information for hints after parsing the first packet...
-      stream->reader_->GetVideoInformation(stream->info_.m_Width, stream->info_.m_Height);
-      stream->reader_->GetAudioInformation(stream->info_.m_Channels);
       return;
     }
     return stream->disable();
