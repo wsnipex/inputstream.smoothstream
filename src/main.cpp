@@ -120,6 +120,14 @@ private:
 
 }kodihost;
 
+struct addonstring
+{
+	addonstring(char *d) { data_ = d; };
+	~addonstring() { xbmc->FreeString(data_); };
+	const char* c_str() { return data_ ? data_ : ""; };
+	char *data_;
+};
+
 /*******************************************************
 Bento4 Streams
 ********************************************************/
@@ -407,20 +415,20 @@ void Session::GetSupportedDecrypterURN(std::pair<std::string, std::string> &urn)
 {
   typedef SSD_DECRYPTER *(*CreateDecryptorInstanceFunc)(SSD_HOST *host, uint32_t version);
 
-  char path[1024];
-  if (!xbmc->GetSetting("DECRYPTERPATH", path))
+  char specialpath[1024];
+  if (!xbmc->GetSetting("DECRYPTERPATH", specialpath))
   {
     xbmc->Log(ADDON::LOG_DEBUG, "DECRYPTERPATH not specified in settings.xml");
     return;
   }
-  xbmc->TranslateSpecialProtocol(path, path, 1024);
+  addonstring path(xbmc->TranslateSpecialProtocol(specialpath));
 
   VFSDirEntry *items(0);
   unsigned int num_items(0);
 
   xbmc->Log(ADDON::LOG_DEBUG, "Searching for decrypters in: %s", path);
 
-  if (!xbmc->GetDirectory(path, "", &items, &num_items))
+  if (!xbmc->GetDirectory(path.c_str(), "", &items, &num_items))
     return;
 
   for (unsigned int i(0); i < num_items; ++i)
@@ -977,6 +985,12 @@ extern "C" {
   }
 
   void DemuxSetSpeed(int speed)
+  {
+
+  }
+
+  //callback - will be called from kodi
+  void SetVideoResolution(int width, int height)
   {
 
   }

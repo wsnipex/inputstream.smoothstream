@@ -25,6 +25,7 @@ static unsigned char HexNibble(char c)
     return 10 + (c - 'a');
   else if (c >= 'A' && c <= 'F')
     return 10 + (c - 'A');
+  return 0;
 }
 
 DASHTree::DASHTree()
@@ -92,7 +93,7 @@ start(void *data, const char *el, const char **attr)
             dash->current_representation_->codec_extra_data_.resize(sz);
             const char* run = (const char*)*(attr + 1);
             std::string::iterator rd(dash->current_representation_->codec_extra_data_.begin());
-            while (sz--){ *rd++ = HexNibble(*run++) << 4 + HexNibble(*run++); }
+            while (sz--){ *rd++ = (HexNibble(*run++) << 4) + HexNibble(*run++); }
           }
           else if (strcmp((const char*)*attr, "NALUnitLengthField") == 0)
             dash->current_representation_->nalu_length_ = static_cast<uint8_t>(atoi((const char*)*(attr + 1)));
