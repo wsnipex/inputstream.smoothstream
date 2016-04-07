@@ -14,6 +14,7 @@
 
 #include "DASHTree.h"
 #include "../oscompat.h"
+#include "../helpers.h"
 
 using namespace dash;
 
@@ -53,7 +54,22 @@ start(void *data, const char *el, const char **attr)
   {
     if (dash->currentNode_ & DASHTree::SSMNODE_PROTECTION)
     {
-      //TBD
+      if (strcmp(el, "ProtectionHeader") == 0)
+      {
+        for (; *attr;)
+        {
+          if (strcmp((const char*)*attr, "SystemID") == 0)
+          {
+            if (strcmp((const char*)*(attr + 1), "{9A04F079-9840-4286-AB92-E65BE0885F95}") == 0)
+            {
+              dash->strXMLText_.clear();
+              dash->currentNode_ |= DASHTree::SSMNODE_PROTECTIONHEADER| DASHTree::SSMNODE_PROTECTIONTEXT;
+            }
+            break;
+          }
+          attr += 2;
+        }
+      }
     }
     else if (dash->currentNode_ & DASHTree::SSMNODE_STREAMINDEX)
     {
@@ -144,7 +160,7 @@ start(void *data, const char *el, const char **attr)
     {
       dash->currentNode_ |= DASHTree::SSMNODE_PROTECTION;
       dash->encryptionState_ = DASHTree::ENCRYTIONSTATE_SUPPORTED;
-    }
+	}
   }
   else if (strcmp(el, "SmoothStreamingMedia") == 0)
   {
@@ -170,6 +186,10 @@ start(void *data, const char *el, const char **attr)
 static void XMLCALL
 text(void *data, const char *s, int len)
 {
+	DASHTree *dash(reinterpret_cast<DASHTree*>(data));
+
+    if (dash->currentNode_  & DASHTree::SSMNODE_PROTECTIONTEXT)
+      dash->strXMLText_ += std::string(s, len);
 }
 
 /*----------------------------------------------------------------------
@@ -184,8 +204,16 @@ end(void *data, const char *el)
   {
     if (dash->currentNode_ & DASHTree::SSMNODE_PROTECTION)
     {
-      if (strcmp(el, "Protection") == 0)
-        dash->currentNode_ &= ~DASHTree::SSMNODE_PROTECTION;
+      if (dash->currentNode_ & DASHTree::SSMNODE_PROTECTIONHEADER)
+      {
+        if (strcmp(el, "ProtectionHeader") == 0)
+          dash->currentNode_ &= ~DASHTree::SSMNODE_PROTECTIONHEADER;
+      }
+      else if (strcmp(el, "Protection") == 0)
+      {
+        dash->currentNode_ &= ~(DASHTree::SSMNODE_PROTECTION| DASHTree::SSMNODE_PROTECTIONTEXT);
+        dash->parse_protection();
+      }
     }
     else if (dash->currentNode_ & DASHTree::SSMNODE_STREAMINDEX)
     {
@@ -216,6 +244,32 @@ end(void *data, const char *el)
     else if (strcmp(el, "SmoothStreamingMedia") == 0)
       dash->currentNode_ &= ~DASHTree::SSMNODE_SSM;
   }
+}
+
+/*----------------------------------------------------------------------
+|   expat protection start
++---------------------------------------------------------------------*/
+static void XMLCALL
+protection_start(void *data, const char *el, const char **attr)
+{
+	DASHTree *dash(reinterpret_cast<DASHTree*>(data));
+}
+
+/*----------------------------------------------------------------------
+|   expat protection text
++---------------------------------------------------------------------*/
+static void XMLCALL
+protection_text(void *data, const char *s, int len)
+{
+}
+
+/*----------------------------------------------------------------------
+|   expat protection end
++---------------------------------------------------------------------*/
+static void XMLCALL
+protection_end(void *data, const char *el)
+{
+	DASHTree *dash(reinterpret_cast<DASHTree*>(data));
 }
 
 /*----------------------------------------------------------------------
@@ -282,4 +336,42 @@ uint32_t DASHTree::estimate_segcount(uint32_t duration, uint32_t timescale)
   double tmp(duration);
   duration /= timescale;
   return static_cast<uint32_t>((overallSeconds_ / duration)*1.01);
+}
+
+void DASHTree::parse_protection()
+{
+  if (strXMLText_.empty())
+    return;
+
+  //(p)repair the content
+  std::string::size_type pos = 0;
+  while ((pos = strXMLText_.find('\n', 0)) != std::string::npos)
+    strXMLText_.erase(pos, 1);
+  
+  unsigned int buffer_size = strXMLText_.size();
+  uint8_t *buffer = (uint8_t*)malloc(buffer_size);
+  if (!b64_decode(strXMLText_.c_str(), buffer_size, buffer, buffer_size))
+  {
+    free(buffer);
+    return;
+  }
+
+  XML_Parser pp = XML_ParserCreate(NULL);
+  if (!pp)
+  {
+    free(buffer);
+    return;
+  }
+
+  XML_SetUserData(pp, (void*)this);
+  XML_SetElementHandler(pp, protection_start, protection_end);
+  XML_SetCharacterDataHandler(pp, protection_text);
+  
+  bool done(false);
+  XML_Parse(pp, strXMLText_.data(), strXMLText_.size(), done);
+
+  XML_ParserFree(pp);
+  free(buffer);
+
+  strXMLText_.clear();
 }

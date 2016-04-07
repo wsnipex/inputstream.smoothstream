@@ -139,7 +139,9 @@ namespace dash
     {
       SSMNODE_SSM = 1 << 0,
       SSMNODE_PROTECTION = 1 << 1,
-      SSMNODE_STREAMINDEX = 1 << 2
+      SSMNODE_STREAMINDEX = 1 << 2,
+      SSMNODE_PROTECTIONHEADER = 1 << 3,
+      SSMNODE_PROTECTIONTEXT = 1 << 4
     };
     std::string strXMLText_;
 
@@ -148,7 +150,8 @@ namespace dash
     bool open(const char *url);
     bool has_type(StreamType t);
     uint32_t estimate_segcount(uint32_t duration, uint32_t timescale);
-    double get_download_speed() const { return download_speed_; };
+	void parse_protection();
+	double get_download_speed() const { return download_speed_; };
     bool empty(){ return !current_period_ || current_period_->adaptationSets_.empty(); };
     const AdaptationSet *GetAdaptationSet(unsigned int pos) const { return current_period_ && pos < current_period_->adaptationSets_.size() ? current_period_->adaptationSets_[pos] : 0; };
 protected:
