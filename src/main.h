@@ -69,7 +69,7 @@ protected:
 class Session
 {
 public:
-  Session(const char *strURL, const char *strLicType, const char* strLicKey);
+  Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData);
   ~Session();
   bool initialize();
   FragmentedSampleReader *GetNextSample();
@@ -103,7 +103,7 @@ protected:
 
 private:
   std::string mpdFileURL_;
-  std::string license_key_, license_type_;
+  std::string license_key_, license_type_, license_data_;
   void * decrypterModule_;
   SSD_DECRYPTER *decrypter_;
 

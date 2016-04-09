@@ -44,11 +44,6 @@ public:
     return m_strProfilePath.c_str();
   };
 
-  virtual const char *GetHexDomain() const override
-  {
-    return m_strHexDomain.c_str();
-  };
-
   virtual void* CURLCreate(const char* strURL) override
   {
     return xbmc->CURLCreate(strURL);
@@ -91,10 +86,9 @@ public:
     return xbmc->Log(xbmcmap[level], msg);
   };
 
-  void SetAddonPaths(const char *profilePath, const char *hexDomain)
+  void SetAddonPath(const char *profilePath)
   {
     m_strProfilePath = profilePath;
-    m_strHexDomain = hexDomain;
 
     const char *pathSep(profilePath[0] && profilePath[1] == ':' && isalpha(profilePath[0]) ? "\\" : "/");
 
@@ -110,13 +104,10 @@ public:
     m_strProfilePath += "cdm";
     m_strProfilePath += pathSep;
     xbmc->CreateDirectory(m_strProfilePath.c_str());
-
-    if (m_strHexDomain.size() && m_strHexDomain.back() != pathSep[0])
-      m_strHexDomain += pathSep;
   }
 
 private:
-  std::string m_strProfilePath, m_strHexDomain;
+  std::string m_strProfilePath;
 
 }kodihost;
 
@@ -381,11 +372,12 @@ void Session::STREAM::disable()
   }
 }
 
-Session::Session(const char *strURL, const char *strLicType, const char* strLicKey)
+Session::Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData)
   :single_sample_decryptor_(0)
   , mpdFileURL_(strURL)
   , license_type_(strLicType)
   , license_key_(strLicKey)
+  , license_data_(strLicData)
   , width_(1280)
   , height_(720)
   , last_pts_(0)
@@ -575,14 +567,78 @@ bool Session::initialize()
   // Try to initialize an SingleSampleDecryptor
   if (dashtree_.encryptionState_)
   {
+    if (dashtree_.protection_key_.size()!=16 || license_data_.empty())
+      return false;
+    
+    uint8_t ld[1024];
+    unsigned int ld_size(1024);
+    b64_decode(license_data_.c_str(), license_data_.size(), ld, ld_size);
+    
+    const uint8_t *uuid((uint8_t*)strstr((const char*)ld, "{UUID}"));
+    unsigned int license_size = uuid ? ld_size + 36 -6: ld_size;
+
+    //Build up proto header
     AP4_DataBuffer init_data;
-
-    const char* pssh = "";
-
-    init_data.SetBufferSize(1024);
-    unsigned int init_data_size(1024);
-    b64_decode(pssh, strlen(pssh), init_data.UseData(), init_data_size);
-    init_data.SetDataSize(init_data_size);
+    init_data.Reserve(512);
+    uint8_t *protoptr(init_data.UseData());
+    *protoptr++ = 18; //id=16>>3=2, type=2(flexlen)
+    *protoptr++ = 16; //length of key
+    memcpy(protoptr, dashtree_.protection_key_.data(), 16);
+    protoptr += 16;
+    //-----------
+    *protoptr++ = 34;//id=32>>3=4, type=2(flexlen)
+    do {
+      *protoptr++ = static_cast<uint8_t>(license_size & 127);
+      license_size >>= 7;
+      if (license_size)
+        *(protoptr - 1) |= 128;
+      else
+        break;
+    } while (1);
+    if (uuid)
+    {
+      static const uint8_t hexmap[16] = { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
+      memcpy(protoptr, ld, uuid - ld);
+      protoptr += uuid - ld;
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[3]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[3]) & 15];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[2]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[2]) & 15];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[1]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[1]) & 15];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[0]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[0]) & 15];
+      *protoptr++ = '-';
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[5]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[5]) & 15];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[4]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[4]) & 15];
+      *protoptr++ = '-';
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[7]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[7]) & 15];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[6]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[6]) & 15];
+      *protoptr++ = '-';
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[8]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[8]) & 15];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[9]) >> 4];
+      *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[9]) & 15];
+      *protoptr++ = '-';
+      for (i = 10; i < 16; ++i)
+      {
+        *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[i]) >> 4];
+        *protoptr++ = hexmap[(uint8_t)(dashtree_.protection_key_.data()[i]) & 15];
+      }
+      unsigned int sizeleft = ld_size - ((uuid - ld) + 6);
+      memcpy(protoptr, uuid+6, sizeleft);
+      protoptr += sizeleft;
+    }
+    else
+    {
+      memcpy(protoptr, ld, ld_size);
+      protoptr += ld_size;
+    }
+    init_data.SetDataSize(protoptr - init_data.UseData());
     return (single_sample_decryptor_ = CreateSingleSampleDecrypter(init_data))!=0;
   }
   return true;
@@ -728,40 +784,29 @@ extern "C" {
   {
     xbmc->Log(ADDON::LOG_DEBUG, "Open()");
 
-    const char *lt(""), *lk("");
+    const char *lt(""), *lk(""), *ld("");
     for (unsigned int i(0); i < props.m_nCountInfoValues; ++i)
     {
-      if (strcmp(props.m_ListItemProperties[i].m_strKey, "inputstream.smoothmedia.license_type") == 0)
+      if (strcmp(props.m_ListItemProperties[i].m_strKey, "inputstream.smoothstream.license_type") == 0)
       {
-        xbmc->Log(ADDON::LOG_DEBUG, "found inputstream.smoothmedia.license_type: %s", props.m_ListItemProperties[i].m_strValue);
+        xbmc->Log(ADDON::LOG_DEBUG, "found inputstream.smoothstream.license_type: %s", props.m_ListItemProperties[i].m_strValue);
         lt = props.m_ListItemProperties[i].m_strValue;
       }
-      else if (strcmp(props.m_ListItemProperties[i].m_strKey, "inputstream.smoothmedia.license_key") == 0)
+      else if (strcmp(props.m_ListItemProperties[i].m_strKey, "inputstream.smoothstream.license_key") == 0)
       {
-        xbmc->Log(ADDON::LOG_DEBUG, "found inputstream.smoothmedia.license_key: [not shown]");
+        xbmc->Log(ADDON::LOG_DEBUG, "found inputstream.smoothstream.license_key: [not shown]");
         lk = props.m_ListItemProperties[i].m_strValue;
+      }
+      else if (strcmp(props.m_ListItemProperties[i].m_strKey, "inputstream.smoothstream.license_data") == 0)
+      {
+        xbmc->Log(ADDON::LOG_DEBUG, "found inputstream.smoothstream.license_data: [not shown]");
+        ld = props.m_ListItemProperties[i].m_strValue;
       }
     }
 
-    //Build up a CDM path to store decrypter specific stuff. Each domain gets it own path
-    const char* bspos(strchr(props.m_strURL, ':'));
-    if (!bspos || bspos[1] != '/' || bspos[2] != '/' || !(bspos = strchr(bspos + 3, '/')))
-    {
-      xbmc->Log(ADDON::LOG_ERROR, "Could not find protocol inside url - invalid");
-      return false;
-    }
-    if (bspos - props.m_strURL > 256)
-    {
-      xbmc->Log(ADDON::LOG_ERROR, "length of domain exeeds max. size of 256 - invalid");
-      return false;
-    }
-    char buffer[1024];
-    buffer[(bspos - props.m_strURL) * 2] = 0;
-    AP4_FormatHex(reinterpret_cast<const uint8_t*>(props.m_strURL), bspos - props.m_strURL, buffer);
+    kodihost.SetAddonPath(props.m_profileFolder);
 
-    kodihost.SetAddonPaths(props.m_profileFolder, buffer);
-
-    session = new Session(props.m_strURL, lt, lk);
+    session = new Session(props.m_strURL, lt, lk, ld);
 
     if (!session->initialize())
     {

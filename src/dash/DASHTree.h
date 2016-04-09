@@ -133,6 +133,7 @@ namespace dash
       ENCRYTIONSTATE_SUPPORTED = 2
     };
     unsigned int  encryptionState_;
+    std::string protection_key_;
     uint8_t adpChannelCount_;
     
     enum

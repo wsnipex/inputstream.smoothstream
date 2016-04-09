@@ -11,6 +11,7 @@
 
 #include <string>
 #include <cstring>
+#include <fstream>
 
 #include "DASHTree.h"
 #include "../oscompat.h"
@@ -253,6 +254,7 @@ static void XMLCALL
 protection_start(void *data, const char *el, const char **attr)
 {
 	DASHTree *dash(reinterpret_cast<DASHTree*>(data));
+    dash->strXMLText_.clear();
 }
 
 /*----------------------------------------------------------------------
@@ -261,6 +263,8 @@ protection_start(void *data, const char *el, const char **attr)
 static void XMLCALL
 protection_text(void *data, const char *s, int len)
 {
+  DASHTree *dash(reinterpret_cast<DASHTree*>(data));
+  dash->strXMLText_ += std::string(s, len);
 }
 
 /*----------------------------------------------------------------------
@@ -270,6 +274,14 @@ static void XMLCALL
 protection_end(void *data, const char *el)
 {
 	DASHTree *dash(reinterpret_cast<DASHTree*>(data));
+    if (strcmp(el, "KID") == 0)
+    {
+      uint8_t buffer[32];
+      unsigned int buffer_size(32);
+      b64_decode(dash->strXMLText_.data(), dash->strXMLText_.size(), buffer, buffer_size);
+      
+      dash->protection_key_ = std::string((const char*)buffer, buffer_size);
+    }
 }
 
 /*----------------------------------------------------------------------
@@ -348,15 +360,25 @@ void DASHTree::parse_protection()
   while ((pos = strXMLText_.find('\n', 0)) != std::string::npos)
     strXMLText_.erase(pos, 1);
   
-  unsigned int buffer_size = strXMLText_.size();
-  uint8_t *buffer = (uint8_t*)malloc(buffer_size);
-  if (!b64_decode(strXMLText_.c_str(), buffer_size, buffer, buffer_size))
+  while (strXMLText_.size() & 3)
+    strXMLText_ += "=";
+
+  unsigned int xml_size = strXMLText_.size();
+  uint8_t *buffer = (uint8_t*)malloc(xml_size), *xml_start(buffer);
+  
+  if (!b64_decode(strXMLText_.c_str(), xml_size, buffer, xml_size))
   {
     free(buffer);
     return;
   }
 
-  XML_Parser pp = XML_ParserCreate(NULL);
+  while (xml_size && *xml_start != '<')
+  {
+    xml_start++;
+    xml_size--;
+  }
+
+  XML_Parser pp = XML_ParserCreate("UTF-16");
   if (!pp)
   {
     free(buffer);
@@ -368,7 +390,7 @@ void DASHTree::parse_protection()
   XML_SetCharacterDataHandler(pp, protection_text);
   
   bool done(false);
-  XML_Parse(pp, strXMLText_.data(), strXMLText_.size(), done);
+  XML_Parse(pp, (const char*)(xml_start), xml_size, done);
 
   XML_ParserFree(pp);
   free(buffer);

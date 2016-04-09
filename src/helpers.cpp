@@ -58,6 +58,7 @@ bool b64_decode(const char *in, unsigned int in_len, uint8_t *out, unsigned int 
 	if (in_len & 3)
 	{
 		free(in_copy);
+        out_len = 0;
 		return false;
 	}
 
@@ -67,6 +68,7 @@ bool b64_decode(const char *in, unsigned int in_len, uint8_t *out, unsigned int 
 	if (new_out_len > out_len)
 	{
 		free(in_copy);
+        out_len = 0;
 		return false;
 	}
 	out_len = new_out_len;

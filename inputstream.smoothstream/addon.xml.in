@@ -12,7 +12,7 @@
     name="smoothstream"
     extension=".ism"
     tags="true"
-    listitemprops="license_type|license_key|initdata"
+    listitemprops="license_type|license_key|license_data"
     library_@PLATFORM@="@LIBRARY_FILENAME@"/>
   <extension point="xbmc.addon.metadata">
     <summary lang="en">InputStream Client for SmoothStreamingMedia files</summary>
