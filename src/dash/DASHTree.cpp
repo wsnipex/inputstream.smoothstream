@@ -146,12 +146,14 @@ start(void *data, const char *el, const char **attr)
           stricmp((const char*)*(attr + 1), "video") == 0 ? DASHTree::VIDEO
           : stricmp((const char*)*(attr + 1), "audio") == 0 ? DASHTree::AUDIO
           : DASHTree::NOTYPE;
+        else if (strcmp((const char*)*attr, "Language") == 0)
+          dash->current_adaptationset_->language_ = (const char*)*(attr + 1);
         else if (strcmp((const char*)*attr, "TimeScale") == 0)
           dash->current_adaptationset_->timescale_ = atoi((const char*)*(attr + 1));
         else if (strcmp((const char*)*attr, "Chunks") == 0)
           dash->current_adaptationset_->segment_durations_.reserve(atoi((const char*)*(attr + 1)));
         else if (strcmp((const char*)*attr, "Url") == 0)
-          dash->current_adaptationset_->base_url_ = (const char*)*(attr + 1);
+          dash->current_adaptationset_->base_url_ = dash->base_url_ + (const char*)*(attr + 1);
         attr += 2;
       }
       dash->segcount_ = 0;
@@ -228,10 +230,12 @@ end(void *data, const char *el)
             b(dash->current_adaptationset_->repesentations_.begin()),
             e(dash->current_adaptationset_->repesentations_.end()); b != e; ++b)
           {
-            (*b)->segments_.resize(dash->current_adaptationset_->segment_durations_.size());
+            (*b)->segments_.resize(dash->current_adaptationset_->segment_durations_.size() + 1);
+            (*b)->segments_.front().range_begin_ = (*b)->segments_.front().range_end_ = ~0;
+            (*b)->hasInitialization_ = true;
             std::vector<uint32_t>::iterator bsd(dash->current_adaptationset_->segment_durations_.begin());
             uint64_t cummulated = 0;
-            for (std::vector<DASHTree::Segment>::iterator bs((*b)->segments_.begin()), es((*b)->segments_.end()); bs != es; ++bsd, ++bs)
+            for (std::vector<DASHTree::Segment>::iterator bs((*b)->segments_.begin()+1), es((*b)->segments_.end()); bs != es; ++bsd, ++bs)
             {
               bs->range_begin_ = ~0;
               bs->range_end_ = cummulated;

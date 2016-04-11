@@ -58,6 +58,7 @@ namespace dash
       //SegmentList
       uint32_t duration_, timescale_;
       std::vector<Segment> segments_;
+      bool has_initialization()const { return hasInitialization_ && (~segments_.front().range_end_ != 0); };
       const Segment *get_initialization()const { return hasInitialization_ ? &segments_[0] : 0; };
       const Segment *get_next_segment(const Segment *seg)const
       {

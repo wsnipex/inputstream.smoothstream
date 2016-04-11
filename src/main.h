@@ -96,6 +96,7 @@ public:
   double GetPTS()const { return last_pts_; };
   bool CheckChange(bool bSet = false){ bool ret = changed_; changed_ = bSet; return ret; };
   bool SeekTime(double seekTime, unsigned int streamId = 0, bool preceeding=true);
+  bool IsEncrypted()const { return dashtree_.encryptionState_ != 0; };
 
 protected:
   void GetSupportedDecrypterURN(std::pair<std::string, std::string> &urn);

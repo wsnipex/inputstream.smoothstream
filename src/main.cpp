@@ -257,6 +257,7 @@ public:
     {
       if (result == AP4_ERROR_EOS) {
         m_eos = true;
+        return AP4_ERROR_EOS;
       }
       else {
         return result;
@@ -367,8 +368,6 @@ void Session::STREAM::disable()
     SAFE_DELETE(input_file_);
     SAFE_DELETE(input_);
     enabled = false;
-    info_.m_ExtraData = 0;
-    info_.m_ExtraSize = 0;
   }
 }
 
@@ -383,6 +382,7 @@ Session::Session(const char *strURL, const char *strLicType, const char* strLicK
   , last_pts_(0)
   , decrypterModule_(0)
   , decrypter_(0)
+  , changed_(false)
 {
   int buf;
   xbmc->GetSetting("LASTBANDWIDTH", (char*)&buf);
@@ -545,11 +545,11 @@ bool Session::initialize()
     strncpy(stream.info_.m_codecInternalName, rep->codecs_.c_str(), pos);
     stream.info_.m_codecInternalName[pos] = 0;
 
-    if (rep->codecs_.find("mp4a") == 0)
+    if (rep->codecs_.find("AAC") == 0)
       strcpy(stream.info_.m_codecName, "aac");
     else if (rep->codecs_.find("ec-3") == 0 || rep->codecs_.find("ac-3") == 0)
       strcpy(stream.info_.m_codecName, "eac3");
-    else if (rep->codecs_.find("avc") == 0)
+    else if (rep->codecs_.find("AVC") == 0)
       strcpy(stream.info_.m_codecName, "h264");
     else if (rep->codecs_.find("hevc") == 0)
       strcpy(stream.info_.m_codecName, "hevc");
@@ -920,16 +920,41 @@ extern "C" {
       stream->stream_.select_stream(true);
 
       stream->input_ = new AP4_DASHStream(&stream->stream_);
-      stream->input_file_ = new AP4_File(*stream->input_, AP4_DefaultAtomFactory::Instance, true);
-      AP4_Movie* movie = stream->input_file_->GetMovie();
-      if (movie == NULL)
-      {
-        xbmc->Log(ADDON::LOG_ERROR, "No MOOV in stream!");
-        return stream->disable();
-      }
-
+ 
+      AP4_Movie* movie = NULL;
       static const AP4_Track::Type TIDC[dash::DASHTree::STREAM_TYPE_COUNT] =
       { AP4_Track::TYPE_UNKNOWN, AP4_Track::TYPE_VIDEO, AP4_Track::TYPE_AUDIO, AP4_Track::TYPE_TEXT };
+
+      if (!stream->stream_.getRepresentation()->has_initialization())
+      {
+        //We'll create a Movie out of the things we got from manifest file
+        //note: movie will be deleted in destructor of stream->input_file_
+        movie = new AP4_Movie();
+
+        AP4_SyntheticSampleTable* sample_table = new AP4_SyntheticSampleTable();
+        AP4_SampleDescription *sample_descryption = new AP4_SampleDescription(AP4_SampleDescription::TYPE_UNKNOWN, 0, 0);
+        if (session->IsEncrypted())
+        {
+          static const AP4_UI08 default_key[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+          AP4_ContainerAtom schi(AP4_ATOM_TYPE_SCHI);
+          schi.AddChild(new AP4_TencAtom(AP4_CENC_ALGORITHM_ID_CTR, 8, default_key));
+          sample_descryption = new AP4_ProtectedSampleDescription(0, sample_descryption, 0, AP4_PROTECTION_SCHEME_TYPE_PIFF, 0, "", &schi);
+        }
+        sample_table->AddSampleDescription(sample_descryption);
+
+        movie->AddTrack(new AP4_Track(TIDC[stream->stream_.get_type()], sample_table, 1, stream->stream_.getRepresentation()->timescale_, 0, stream->stream_.getRepresentation()->timescale_, 0, "", 0, 0));
+        //Create a dumy MOOV Atom to tell Bento4 its a fragmented stream
+        AP4_MoovAtom *moov = new AP4_MoovAtom();
+        moov->AddChild(new AP4_ContainerAtom(AP4_ATOM_TYPE_MVEX));
+        movie->SetMoovAtom(moov);
+      }
+      stream->input_file_ = new AP4_File(*stream->input_, AP4_DefaultAtomFactory::Instance, true, movie);
+      movie = stream->input_file_->GetMovie();
+      if (movie == NULL)
+      {
+        xbmc->Log(ADDON::LOG_ERROR, "No MOOV found in stream's initialization");
+        return stream->disable();
+      }
 
       AP4_Track *track = movie->GetTrack(TIDC[stream->stream_.get_type()]);
       if (!track)
@@ -941,7 +966,7 @@ extern "C" {
       stream->reader_ = new FragmentedSampleReader(stream->input_, movie, track, streamid, session->GetSingleSampleDecryptor());
 
       // Set the session Changed to force new GetStreamInfo call from kodi -> addon
-      session->CheckChange(true);
+      // session->CheckChange(true);
 
       if ((pts > 0 && !session->SeekTime(static_cast<double>(pts)*0.000001f, streamid))
       ||(pts <= 0 && !AP4_SUCCEEDED(stream->reader_->ReadSample())))

@@ -35,7 +35,7 @@ bool DASHStream::download_segment()
   segment_read_pos_ = 0;
 
   char rangebuf[128];
-  if (!current_seg_)
+  if (!current_seg_ || !~current_seg_->range_end_)
     return false;
   
   std::string strURL(current_rep_->url_);
