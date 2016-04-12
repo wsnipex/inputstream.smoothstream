@@ -85,6 +85,7 @@ start(void *data, const char *el, const char **attr)
         
         dash->current_representation_ = new DASHTree::Representation();
         dash->current_representation_->url_ = dash->current_adaptationset_->base_url_;
+        dash->current_representation_->timescale_ = dash->current_adaptationset_->timescale_;
         
         const char *bw = "0";
         
@@ -96,7 +97,7 @@ start(void *data, const char *el, const char **attr)
             dash->current_representation_->codecs_ = (const char*)*(attr + 1);
           else if (strcmp((const char*)*attr, "MaxWidth") == 0)
             dash->current_representation_->width_ = static_cast<uint16_t>(atoi((const char*)*(attr + 1)));
-          else if (strcmp((const char*)*attr, "height") == 0)
+          else if (strcmp((const char*)*attr, "MaxHeight") == 0)
             dash->current_representation_->height_ = static_cast<uint16_t>(atoi((const char*)*(attr + 1)));
           else if (strcmp((const char*)*attr, "SamplingRate") == 0)
             dash->current_representation_->samplingRate_ = static_cast<uint32_t>(atoi((const char*)*(attr + 1)));
@@ -139,6 +140,7 @@ start(void *data, const char *el, const char **attr)
       //<StreamIndex Type = "video" TimeScale = "10000000" Name = "video" Chunks = "3673" QualityLevels = "6" Url = "QualityLevels({bitrate})/Fragments(video={start time})" MaxWidth = "960" MaxHeight = "540" DisplayWidth = "960" DisplayHeight = "540">
       dash->current_adaptationset_ = new DASHTree::AdaptationSet();
       dash->current_period_->adaptationSets_.push_back(dash->current_adaptationset_);
+
       for (; *attr;)
       {
         if (strcmp((const char*)*attr, "Type") == 0)

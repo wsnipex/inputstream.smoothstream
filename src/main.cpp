@@ -119,6 +119,30 @@ struct addonstring
 	char *data_;
 };
 
+class DummyDecrypter : public AP4_CencSingleSampleDecrypter
+{
+public:
+  DummyDecrypter() :AP4_CencSingleSampleDecrypter(0) {};
+  
+  virtual AP4_Result DecryptSampleData(AP4_DataBuffer& data_in,
+    AP4_DataBuffer& data_out,
+
+    // always 16 bytes
+    const AP4_UI08* iv,
+
+    // pass 0 for full decryption
+    unsigned int    subsample_count,
+
+    // array of <subsample_count> integers. NULL if subsample_count is 0
+    const AP4_UI16* bytes_of_cleartext_data,
+
+    // array of <subsample_count> integers. NULL if subsample_count is 0
+    const AP4_UI32* bytes_of_encrypted_data) override 
+  {
+    return AP4_SUCCESS;
+  };
+};
+
 /*******************************************************
 Bento4 Streams
 ********************************************************/
@@ -565,6 +589,7 @@ bool Session::initialize()
   }
 
   // Try to initialize an SingleSampleDecryptor
+#if 1  
   if (dashtree_.encryptionState_)
   {
     if (dashtree_.protection_key_.size()!=16 || license_data_.empty())
@@ -641,6 +666,11 @@ bool Session::initialize()
     init_data.SetDataSize(protoptr - init_data.UseData());
     return (single_sample_decryptor_ = CreateSingleSampleDecrypter(init_data))!=0;
   }
+#else
+  return (single_sample_decryptor_ = new DummyDecrypter()) != 0;
+  
+  //dashtree_.encryptionState_ = 0;
+#endif
   return true;
 }
 
@@ -856,7 +886,7 @@ extern "C" {
     if(session)
     {
         iids.m_streamCount = session->GetStreamCount();
-        for (unsigned int i(0); i < iids.m_streamCount;++i)
+        for (unsigned int i(1); i < iids.m_streamCount;++i)
           iids.m_streamIds[i] = i+1;
     } else
         iids.m_streamCount = 0;
