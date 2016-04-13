@@ -19,17 +19,6 @@
 
 using namespace dash;
 
-static unsigned char HexNibble(char c)
-{
-  if (c >= '0' && c <= '9')
-    return c - '0';
-  else if (c >= 'a' && c <= 'f')
-    return 10 + (c - 'a');
-  else if (c >= 'A' && c <= 'F')
-    return 10 + (c - 'A');
-  return 0;
-}
-
 DASHTree::DASHTree()
   :download_speed_(0.0)
   , parser_(0)
@@ -106,13 +95,7 @@ start(void *data, const char *el, const char **attr)
           else if (strcmp((const char*)*attr, "Index") == 0)
             dash->current_representation_->id = (const char*)*(attr + 1);
           else if (strcmp((const char*)*attr, "CodecPrivateData") == 0)
-          {
-            unsigned int sz = strlen((const char*)*(attr + 1)) >> 1;
-            dash->current_representation_->codec_extra_data_.resize(sz);
-            const char* run = (const char*)*(attr + 1);
-            std::string::iterator rd(dash->current_representation_->codec_extra_data_.begin());
-            while (sz--){ *rd++ = (HexNibble(*run++) << 4) + HexNibble(*run++); }
-          }
+            dash->current_representation_->codec_extra_data_ = annexb_to_avc((const char*)*(attr + 1));
           else if (strcmp((const char*)*attr, "NALUnitLengthField") == 0)
             dash->current_representation_->nalu_length_ = static_cast<uint8_t>(atoi((const char*)*(attr + 1)));
           attr += 2;
