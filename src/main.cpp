@@ -49,25 +49,20 @@ public:
     return xbmc->CURLCreate(strURL);
   };
 
-  virtual bool CURLAddOption(void* file, CURLOPTIONS opt, const char* name, const char * value)override
+  virtual bool CURLAddOption(void* file, CURLOPTIONS opt, const char* name, const char* value)override
   {
     const XFILE::CURLOPTIONTYPE xbmcmap[] = { XFILE::CURL_OPTION_PROTOCOL, XFILE::CURL_OPTION_HEADER };
     return xbmc->CURLAddOption(file, xbmcmap[opt], name, value);
   }
 
-  virtual bool CURLOpen(void* file, CURLFLAGS flags)override
+  virtual bool CURLOpen(void* file)override
   {
-    return xbmc->CURLOpen(file, XFILE::READ_NO_CACHE | (flags ? XFILE::READ_AFTER_WRITE : 0));
+    return xbmc->CURLOpen(file, XFILE::READ_NO_CACHE);
   };
 
   virtual size_t ReadFile(void* file, void* lpBuf, size_t uiBufSize)override
   {
     return xbmc->ReadFile(file, lpBuf, uiBufSize);
-  };
-
-  virtual size_t WriteFile(void* file, const void* lpBuf, size_t uiBufSize)override
-  {
-    return xbmc->WriteFile(file, lpBuf, uiBufSize);
   };
 
   virtual void CloseFile(void* file)override
@@ -573,7 +568,8 @@ bool Session::initialize()
       strcpy(stream.info_.m_codecName, "aac");
     else if (rep->codecs_.find("ec-3") == 0 || rep->codecs_.find("ac-3") == 0)
       strcpy(stream.info_.m_codecName, "eac3");
-    else if (rep->codecs_.find("AVC") == 0)
+    else if (rep->codecs_.find("AVC") == 0
+    || rep->codecs_.find("H264") == 0)
       strcpy(stream.info_.m_codecName, "h264");
     else if (rep->codecs_.find("hevc") == 0)
       strcpy(stream.info_.m_codecName, "hevc");

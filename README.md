@@ -36,4 +36,4 @@ Measuring the bandwidth needs some intelligence to switch not for any small netw
 [bento4 library](https://www.bento4.com/) For me the best library choice for mp4 streams. Well written and extensible!
 
 ##### Continuous integration:
-[Travis CI build state:](https://travis-ci.org/mapfau) ![alt tag](https://travis-ci.org/mapfau/inputstream.smoothmedia.svg?branch=master)  
+[Travis CI build state:](https://travis-ci.org/mapfau) ![alt tag](https://travis-ci.org/mapfau/inputstream.smoothstream.svg?branch=master)  
