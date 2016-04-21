@@ -43,12 +43,15 @@ namespace dash
 
     unsigned int get_type()const{ return type_; };
 
-    uint32_t read(void* buffer,
-      uint32_t  bytesToRead);
+    uint32_t read(void* buffer, uint32_t  bytesToRead);
     uint64_t tell(){ read(0, 0);  return absolute_position_; };
     bool seek(uint64_t const pos);
     bool seek_time(double seek_seconds, double current_seconds, bool &needReset);
+    DASHTree::AdaptationSet const *getAdaptation() { return current_adp_; };
     DASHTree::Representation const *getRepresentation(){ return current_rep_; };
+    size_t getSegmentPos() { return current_rep_->segments_.pos(current_seg_); };
+    uint64_t GetLiveOffset() { return current_seg_ && tree_.isLive_ ? current_seg_->range_end_ : 0; }
+
   protected:
     virtual bool download(const char* url){ return false; };
     bool write_data(const void *buffer, size_t buffer_size);

@@ -256,9 +256,9 @@ public:
     , m_SingleSampleDecryptor(ssd)
     , m_Decrypter(0)
     , m_Protected_desc(0)
+    , m_Observer(0)
   {
     EnableTrack(m_Track->GetId());
-
     AP4_SampleDescription *desc(m_Track->GetSampleDescription(0));
     if (desc->GetType() == AP4_SampleDescription::TYPE_PROTECTED)
       m_Protected_desc = static_cast<AP4_ProtectedSampleDescription*>(desc);
@@ -316,6 +316,9 @@ public:
   AP4_Size GetSampleDataSize()const{ return m_sample_data_.GetDataSize(); };
   const AP4_Byte *GetSampleData()const{ return m_sample_data_.GetData(); };
   double GetDuration()const{ return (double)m_sample_.GetDuration() / (double)m_Track->GetMediaTimeScale(); };
+  void SetObserver(FragmentObserver *observer) { m_Observer = observer; };
+  void SetLiveOffset(uint64_t liveOffset) { FindTracker(m_Track->GetId())->m_NextDts = liveOffset; };
+  uint64_t GetFragmentDuration() { return dynamic_cast<AP4_FragmentSampleTable*>(FindTracker(m_Track->GetId())->m_SampleTable)->GetDuration(); };
 
   bool TimeSeek(double pts, bool preceeding)
   {
@@ -335,6 +338,15 @@ protected:
     AP4_Position       mdat_payload_offset)
   {
     AP4_Result result;
+
+    if (!~m_Track->GetId())
+    {
+      AP4_TfhdAtom* tfhd = AP4_DYNAMIC_CAST(AP4_TfhdAtom, moof->FindChild("traf/tfhd"));
+      m_Track->SetId(tfhd->GetTrackId());
+    }
+
+    if (m_Observer)
+      m_Observer->BeginFragment(m_StreamId);
 
     if (AP4_SUCCEEDED((result = AP4_LinearReader::ProcessMoof(moof, moof_offset, mdat_payload_offset))) &&  m_Protected_desc)
     {
@@ -356,6 +368,8 @@ protected:
       if (AP4_FAILED(result = AP4_CencSampleDecrypter::Create(sample_table, algorithm_id, 0, 0, 0, m_SingleSampleDecryptor, m_Decrypter)))
         return result;
     }
+    if (m_Observer)
+      m_Observer->EndFragment(m_StreamId);
     return result;
   }
 
@@ -371,6 +385,7 @@ private:
   AP4_ProtectedSampleDescription *m_Protected_desc;
   AP4_CencSingleSampleDecrypter *m_SingleSampleDecryptor;
   AP4_CencSampleDecrypter *m_Decrypter;
+  FragmentObserver *m_Observer;
 };
 
 /*******************************************************
@@ -712,6 +727,19 @@ bool Session::SeekTime(double seekTime, unsigned int streamId, bool preceeding)
   return ret;
 }
 
+void Session::BeginFragment(AP4_UI32 streamId)
+{
+  STREAM *s(streams_[streamId - 1]);
+  s->reader_->SetLiveOffset(s->stream_.GetLiveOffset());
+}
+
+void Session::EndFragment(AP4_UI32 streamId)
+{
+  STREAM *s(streams_[streamId - 1]);
+  dashtree_.SetFragmentDuration(s->stream_.getAdaptation(), s->stream_.getSegmentPos(), s->reader_->GetFragmentDuration());
+}
+
+
 /***************************  Interface *********************************/
 
 #include "kodi_inputstream_dll.h"
@@ -951,7 +979,7 @@ extern "C" {
       static const AP4_Track::Type TIDC[dash::DASHTree::STREAM_TYPE_COUNT] =
       { AP4_Track::TYPE_UNKNOWN, AP4_Track::TYPE_VIDEO, AP4_Track::TYPE_AUDIO, AP4_Track::TYPE_TEXT };
 
-      if (!stream->stream_.getRepresentation()->has_initialization())
+      if (1/*!stream->stream_.getRepresentation()->has_initialization()*/)
       {
         //We'll create a Movie out of the things we got from manifest file
         //note: movie will be deleted in destructor of stream->input_file_
@@ -968,7 +996,7 @@ extern "C" {
         }
         sample_table->AddSampleDescription(sample_descryption);
 
-        movie->AddTrack(new AP4_Track(TIDC[stream->stream_.get_type()], sample_table, 1, stream->stream_.getRepresentation()->timescale_, 0, stream->stream_.getRepresentation()->timescale_, 0, "", 0, 0));
+        movie->AddTrack(new AP4_Track(TIDC[stream->stream_.get_type()], sample_table, ~0, stream->stream_.getRepresentation()->timescale_, 0, stream->stream_.getRepresentation()->timescale_, 0, "", 0, 0));
         //Create a dumy MOOV Atom to tell Bento4 its a fragmented stream
         AP4_MoovAtom *moov = new AP4_MoovAtom();
         moov->AddChild(new AP4_ContainerAtom(AP4_ATOM_TYPE_MVEX));
@@ -989,13 +1017,20 @@ extern "C" {
         return stream->disable();
       }
 
-      stream->reader_ = new FragmentedSampleReader(stream->input_, movie, track, streamid, session->GetSingleSampleDecryptor());
+      stream->reader_ = new FragmentedSampleReader(
+        stream->input_,
+        movie, track,
+        streamid,
+        session->GetSingleSampleDecryptor());
+
+      if(session->IsLive())
+        stream->reader_->SetObserver(dynamic_cast<FragmentObserver*>(session));
 
       // Set the session Changed to force new GetStreamInfo call from kodi -> addon
       // session->CheckChange(true);
 
-      if ((pts > 0 && !session->SeekTime(static_cast<double>(pts)*0.000001f, streamid))
-      ||(pts <= 0 && !AP4_SUCCEEDED(stream->reader_->ReadSample())))
+      if ((pts > 0.2f && !session->SeekTime(static_cast<double>(pts)*0.000001f, streamid))
+      ||(pts <= 0.2f && !AP4_SUCCEEDED(stream->reader_->ReadSample())))
         return stream->disable();
 
       return;
@@ -1109,12 +1144,12 @@ extern "C" {
 
   bool CanPauseStream(void)
   {
-    return true;
+    return !session->IsLive();
   }
 
   bool CanSeekStream(void)
   {
-    return true;
+    return !session->IsLive();
   }
 
   bool PosTime(int)

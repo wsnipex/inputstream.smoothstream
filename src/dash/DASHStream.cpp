@@ -39,7 +39,7 @@ bool DASHStream::download_segment()
     return false;
   
   std::string strURL(current_rep_->url_);
-  sprintf(rangebuf, "%" PRIu64, current_seg_->range_end_);
+  sprintf(rangebuf, "%" PRIu64, tree_.minLiveTime_ + current_seg_->range_end_);
   strURL.replace(strURL.find("{start time}"), 12, rangebuf);
 
   return download(strURL.c_str());
@@ -135,12 +135,12 @@ bool DASHStream::seek_time(double seek_seconds, double current_seconds, bool &ne
 
   uint32_t choosen_seg(~0);
   
-  if (!current_adp_->segment_durations_.empty())
+  if (!current_adp_->segment_durations_.data.empty())
   {
     uint64_t sec_in_ts = static_cast<uint64_t>(seek_seconds * current_adp_->timescale_);
     choosen_seg = 0;
-    while (choosen_seg < current_adp_->segment_durations_.size() && sec_in_ts > current_adp_->segment_durations_[choosen_seg])
-      sec_in_ts -= current_adp_->segment_durations_[choosen_seg++];
+    while (choosen_seg < current_adp_->segment_durations_.data.size() && sec_in_ts > *current_adp_->segment_durations_[choosen_seg])
+      sec_in_ts -= *current_adp_->segment_durations_[choosen_seg++];
   } 
   else if (current_rep_->duration_ > 0 && current_rep_->timescale_ > 0)
   {
@@ -148,7 +148,7 @@ bool DASHStream::seek_time(double seek_seconds, double current_seconds, bool &ne
     choosen_seg = static_cast<uint32_t>(sec_in_ts / current_rep_->duration_);
   }
   const DASHTree::Segment* old_seg(current_seg_);
-  if ((current_seg_ = current_rep_->get_segment(choosen_seg, true)))
+  if ((current_seg_ = current_rep_->get_segment(choosen_seg)))
   {
     needReset = true;
     if (current_seg_ != old_seg)
@@ -201,12 +201,17 @@ bool DASHStream::select_stream(bool force, bool justInit)
   if (observer_)
     observer_->OnStreamChange(this, segid);
 
-  /* lets download the initialization */
-  if ((current_seg_ = current_rep_->get_initialization()))
-    return download_segment();
+  if (tree_.isLive_) //Select an segment 8 secs befor end
+  {
+    size_t relativePTS = tree_.maxLiveTime_ - tree_.minLiveTime_ - 8* current_adp_->timescale_;
 
-  stopped_ = true;
-  return false;
+    size_t curSeg(current_rep_->segments_.data.size());
+    while (curSeg && (current_seg_ = current_rep_->segments_[--curSeg])->range_end_ > relativePTS);
+    current_seg_ = curSeg ? current_rep_->segments_[--curSeg] : 0;
+  } else //Start from beginning
+    current_seg_ = 0;
+
+  return true;
 }
 
 void DASHStream::info(std::ostream &s)

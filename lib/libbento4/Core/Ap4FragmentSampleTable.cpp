@@ -50,6 +50,7 @@ AP4_FragmentSampleTable::AP4_FragmentSampleTable(AP4_ContainerAtom* traf,
                                                  AP4_Position       mdat_payload_offset,
                                                  AP4_UI64           dts_origin)
                                                  :m_InternalTrackId(internal_track_id)
+                                                 ,m_Duration(0)
 {
     AP4_TfhdAtom* tfhd = AP4_DYNAMIC_CAST(AP4_TfhdAtom, traf->GetChild(AP4_ATOM_TYPE_TFHD));
     if (tfhd == NULL) return;
@@ -131,7 +132,7 @@ AP4_FragmentSampleTable::AddTrun(AP4_TrunAtom*   trun,
         data_offset += trun->GetDataOffset();
     }         
     // MS hack
-    if (data_offset == moof_offset) {
+    if (data_offset < payload_offset) {
         data_offset = payload_offset;
     } else {
         payload_offset = data_offset;

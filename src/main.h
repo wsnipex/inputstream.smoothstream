@@ -66,7 +66,14 @@ protected:
   virtual bool download(const char* url);
 };
 
-class Session
+class FragmentObserver
+{
+public:
+  virtual void BeginFragment(AP4_UI32 streamId) = 0;
+  virtual void EndFragment(AP4_UI32 streamId) = 0;
+};
+
+class Session: public FragmentObserver
 {
 public:
   Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData);
@@ -97,6 +104,11 @@ public:
   bool CheckChange(bool bSet = false){ bool ret = changed_; changed_ = bSet; return ret; };
   bool SeekTime(double seekTime, unsigned int streamId = 0, bool preceeding=true);
   bool IsEncrypted()const { return dashtree_.encryptionState_ != 0; };
+  bool IsLive()const { return dashtree_.isLive_; };
+
+  //Observer Section
+  void BeginFragment(AP4_UI32 streamId) override;
+  void EndFragment(AP4_UI32 streamId) override;
 
 protected:
   void GetSupportedDecrypterURN(std::pair<std::string, std::string> &urn);

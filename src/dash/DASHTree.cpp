@@ -23,6 +23,9 @@ DASHTree::DASHTree()
   :download_speed_(0.0)
   , parser_(0)
   , encryptionState_(ENCRYTIONSTATE_UNENCRYPTED)
+  , isLive_(false)
+  , minLiveTime_(~0)
+  , maxLiveTime_(~0)
 {
   current_period_ = new DASHTree::Period;
   periods_.push_back(current_period_);
@@ -50,7 +53,8 @@ start(void *data, const char *el, const char **attr)
         {
           if (strcmp((const char*)*attr, "SystemID") == 0)
           {
-            if (strcmp((const char*)*(attr + 1), "{9A04F079-9840-4286-AB92-E65BE0885F95}") == 0)
+            if (strstr((const char*)*(attr + 1), "9A04F079-9840-4286-AB92-E65BE0885F95")
+            || strstr((const char*)*(attr + 1), "9a04f079-9840-4286-ab92-e65be0885f95"))
             {
               dash->strXMLText_.clear();
               dash->currentNode_ |= DASHTree::SSMNODE_PROTECTIONHEADER| DASHTree::SSMNODE_PROTECTIONTEXT;
@@ -67,17 +71,17 @@ start(void *data, const char *el, const char **attr)
       {
         //<QualityLevel Index = "0" Bitrate = "150000" NominalBitrate = "150784" BufferTime = "3000" FourCC = "AVC1" MaxWidth = "480" MaxHeight = "272" CodecPrivateData = "000000016742E01E96540F0477FE0110010ED100000300010000030032E4A0093401BB2F7BE3250049A00DD97BDF0A0000000168CE060CC8" NALUnitLengthField = "4" / >
         //<QualityLevel Index = "0" Bitrate = "48000" SamplingRate = "24000" Channels = "2" BitsPerSample = "16" PacketSize = "4" AudioTag = "255" FourCC = "AACH" CodecPrivateData = "131056E598" / >
- 
+
         std::string::size_type pos = dash->current_adaptationset_->base_url_.find("{bitrate}");
         if (pos == std::string::npos)
           return;
-        
+
         dash->current_representation_ = new DASHTree::Representation();
         dash->current_representation_->url_ = dash->current_adaptationset_->base_url_;
         dash->current_representation_->timescale_ = dash->current_adaptationset_->timescale_;
-        
+
         const char *bw = "0";
-        
+
         for (; *attr;)
         {
           if (strcmp((const char*)*attr, "Bitrate") == 0)
@@ -109,9 +113,19 @@ start(void *data, const char *el, const char **attr)
         //<c n = "0" d = "20000000" / >
         for (; *attr;)
         {
-          if (*(const char*)*attr == 'd')
+          if (*(const char*)*attr == 't')
           {
-            dash->current_adaptationset_->segment_durations_.push_back(atoi((const char*)*(attr + 1)));
+            uint64_t lt(atoll((const char*)*(attr + 1)));
+            if (dash->current_adaptationset_->last_live_time_)
+              dash->current_adaptationset_->segment_durations_.data.back() = static_cast<uint32_t>(lt - dash->current_adaptationset_->last_live_time_);
+            else
+              dash->current_adaptationset_->first_live_time_ = lt;
+            dash->current_adaptationset_->last_live_time_ = lt;
+            dash->current_adaptationset_->segment_durations_.data.push_back(0);
+          }
+          else if (*(const char*)*attr == 'd')
+          {
+            dash->current_adaptationset_->segment_durations_.data.push_back(atoi((const char*)*(attr + 1)));
             break;
           }
           attr += 2;
@@ -136,7 +150,7 @@ start(void *data, const char *el, const char **attr)
         else if (strcmp((const char*)*attr, "TimeScale") == 0)
           dash->current_adaptationset_->timescale_ = atoi((const char*)*(attr + 1));
         else if (strcmp((const char*)*attr, "Chunks") == 0)
-          dash->current_adaptationset_->segment_durations_.reserve(atoi((const char*)*(attr + 1)));
+          dash->current_adaptationset_->segment_durations_.data.reserve(atoi((const char*)*(attr + 1)));
         else if (strcmp((const char*)*attr, "Url") == 0)
           dash->current_adaptationset_->base_url_ = dash->base_url_ + (const char*)*(attr + 1);
         attr += 2;
@@ -160,6 +174,8 @@ start(void *data, const char *el, const char **attr)
         timeScale = atoi((const char*)*(attr + 1));
       else if (strcmp((const char*)*attr, "Duration") == 0)
         duration = atoi((const char*)*(attr + 1));
+      else if (strcmp((const char*)*attr, "IsLive") == 0)
+        dash->isLive_ = strcmp((const char*)*(attr + 1), "TRUE") == 0;
       attr += 2;
     }
     if (timeScale)
@@ -207,26 +223,15 @@ end(void *data, const char *el)
     {
       if (strcmp(el, "StreamIndex") == 0)
       {
-        if (dash->current_adaptationset_->repesentations_.empty())
+        if (dash->current_adaptationset_->repesentations_.empty()
+        || dash->current_adaptationset_->segment_durations_.data.empty())
           dash->current_period_->adaptationSets_.pop_back();
         else
         {
-          for (std::vector<DASHTree::Representation*>::iterator
-            b(dash->current_adaptationset_->repesentations_.begin()),
-            e(dash->current_adaptationset_->repesentations_.end()); b != e; ++b)
-          {
-            (*b)->segments_.resize(dash->current_adaptationset_->segment_durations_.size() + 1);
-            (*b)->segments_.front().range_begin_ = (*b)->segments_.front().range_end_ = ~0;
-            (*b)->hasInitialization_ = true;
-            std::vector<uint32_t>::iterator bsd(dash->current_adaptationset_->segment_durations_.begin());
-            uint64_t cummulated = 0;
-            for (std::vector<DASHTree::Segment>::iterator bs((*b)->segments_.begin()+1), es((*b)->segments_.end()); bs != es; ++bsd, ++bs)
-            {
-              bs->range_begin_ = ~0;
-              bs->range_end_ = cummulated;
-              cummulated += *bsd;
-            }
-          }
+          if (dash->current_adaptationset_->first_live_time_ < dash->minLiveTime_)
+            dash->minLiveTime_ = dash->current_adaptationset_->first_live_time_;
+          if (dash->current_adaptationset_->last_live_time_ < dash->maxLiveTime_)
+            dash->maxLiveTime_ = dash->current_adaptationset_->last_live_time_;
         }
         dash->currentNode_ &= ~DASHTree::SSMNODE_STREAMINDEX;
       }
@@ -268,7 +273,7 @@ protection_end(void *data, const char *el)
       uint8_t buffer[32];
       unsigned int buffer_size(32);
       b64_decode(dash->strXMLText_.data(), dash->strXMLText_.size(), buffer, buffer_size);
-      
+
       dash->protection_key_ = std::string((const char*)buffer, buffer_size);
     }
 }
@@ -301,11 +306,29 @@ bool DASHTree::open(const char *url)
   strXMLText_.clear();
 
   bool ret = download(url);
-  
+
   XML_ParserFree(parser_);
   parser_ = 0;
 
-  return ret;
+  if (!ret)
+    return false;
+
+  for (std::vector<AdaptationSet*>::iterator ba(current_period_->adaptationSets_.begin()), ea(current_period_->adaptationSets_.end()); ba != ea; ++ba)
+  {
+    for (std::vector<DASHTree::Representation*>::iterator b((*ba)->repesentations_.begin()), e((*ba)->repesentations_.end()); b != e; ++b)
+    {
+      (*b)->segments_.data.resize((*ba)->segment_durations_.data.size());
+      std::vector<uint32_t>::iterator bsd((*ba)->segment_durations_.data.begin());
+      uint64_t cummulated = (*ba)->first_live_time_ - minLiveTime_;
+      for (std::vector<DASHTree::Segment>::iterator bs((*b)->segments_.data.begin()), es((*b)->segments_.data.end()); bs != es; ++bsd, ++bs)
+      {
+        bs->range_begin_ = ~0;
+        bs->range_end_ = cummulated;
+        cummulated += *bsd;
+      }
+    }
+  }
+  return true;
 }
 
 bool DASHTree::write_data(void *buffer, size_t buffer_size)
@@ -348,13 +371,13 @@ void DASHTree::parse_protection()
   std::string::size_type pos = 0;
   while ((pos = strXMLText_.find('\n', 0)) != std::string::npos)
     strXMLText_.erase(pos, 1);
-  
+
   while (strXMLText_.size() & 3)
     strXMLText_ += "=";
 
   unsigned int xml_size = strXMLText_.size();
   uint8_t *buffer = (uint8_t*)malloc(xml_size), *xml_start(buffer);
-  
+
   if (!b64_decode(strXMLText_.c_str(), xml_size, buffer, xml_size))
   {
     free(buffer);
@@ -377,7 +400,7 @@ void DASHTree::parse_protection()
   XML_SetUserData(pp, (void*)this);
   XML_SetElementHandler(pp, protection_start, protection_end);
   XML_SetCharacterDataHandler(pp, protection_text);
-  
+
   bool done(false);
   XML_Parse(pp, (const char*)(xml_start), xml_size, done);
 
@@ -386,3 +409,22 @@ void DASHTree::parse_protection()
 
   strXMLText_.clear();
 }
+
+void DASHTree::SetFragmentDuration(const AdaptationSet* adp, size_t pos, uint32_t fragmentDuration)
+{
+  // Check if its the last frame we watch
+  if (isLive_ && pos == adp->segment_durations_.data.size() - 1)
+  {
+    //Get a modifiable adaptationset
+    AdaptationSet *adpm(static_cast<AdaptationSet *>((void*)adp));
+
+    adpm->segment_durations_.insert(fragmentDuration);
+    //Get segment currently played
+    Segment seg(*(adpm->repesentations_.front()->segments_[pos]));
+    seg.range_end_ += fragmentDuration;
+
+    for (std::vector<Representation*>::iterator b(adpm->repesentations_.begin()), e(adpm->repesentations_.end()); b != e; ++b)
+      (*b)->segments_.insert(seg);
+  }
+}
+
