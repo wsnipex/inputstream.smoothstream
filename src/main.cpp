@@ -452,7 +452,7 @@ void Session::GetSupportedDecrypterURN(std::pair<std::string, std::string> &urn)
   VFSDirEntry *items(0);
   unsigned int num_items(0);
 
-  xbmc->Log(ADDON::LOG_DEBUG, "Searching for decrypters in: %s", path);
+  xbmc->Log(ADDON::LOG_DEBUG, "Searching for decrypters in: %s", path.c_str());
 
   if (!xbmc->GetDirectory(path.c_str(), "", &items, &num_items))
     return;
