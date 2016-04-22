@@ -166,14 +166,14 @@ start(void *data, const char *el, const char **attr)
   }
   else if (strcmp(el, "SmoothStreamingMedia") == 0)
   {
-    unsigned int timeScale = 0, duration = 0;
+    uint64_t timeScale = 0, duration = 0;
     dash->overallSeconds_ = 0;
     for (; *attr;)
     {
       if (strcmp((const char*)*attr, "TimeScale") == 0)
-        timeScale = atoi((const char*)*(attr + 1));
+        timeScale = atoll((const char*)*(attr + 1));
       else if (strcmp((const char*)*attr, "Duration") == 0)
-        duration = atoi((const char*)*(attr + 1));
+        duration = atoll((const char*)*(attr + 1));
       else if (strcmp((const char*)*attr, "IsLive") == 0)
         dash->isLive_ = strcmp((const char*)*(attr + 1), "TRUE") == 0;
       attr += 2;
