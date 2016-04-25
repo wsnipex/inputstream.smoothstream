@@ -317,7 +317,7 @@ public:
   const AP4_Byte *GetSampleData()const{ return m_sample_data_.GetData(); };
   double GetDuration()const{ return (double)m_sample_.GetDuration() / (double)m_Track->GetMediaTimeScale(); };
   void SetObserver(FragmentObserver *observer) { m_Observer = observer; };
-  void SetLiveOffset(uint64_t liveOffset) { FindTracker(m_Track->GetId())->m_NextDts = liveOffset; };
+  void SetPTSOffset(uint64_t offset) { FindTracker(m_Track->GetId())->m_NextDts = offset; };
   uint64_t GetFragmentDuration() { return dynamic_cast<AP4_FragmentSampleTable*>(FindTracker(m_Track->GetId())->m_SampleTable)->GetDuration(); };
 
   bool TimeSeek(double pts, bool preceeding)
@@ -730,7 +730,7 @@ bool Session::SeekTime(double seekTime, unsigned int streamId, bool preceeding)
 void Session::BeginFragment(AP4_UI32 streamId)
 {
   STREAM *s(streams_[streamId - 1]);
-  s->reader_->SetLiveOffset(s->stream_.GetLiveOffset());
+  s->reader_->SetPTSOffset(s->stream_.GetPTSOffset());
 }
 
 void Session::EndFragment(AP4_UI32 streamId)
@@ -1023,8 +1023,7 @@ extern "C" {
         streamid,
         session->GetSingleSampleDecryptor());
 
-      if(session->IsLive())
-        stream->reader_->SetObserver(dynamic_cast<FragmentObserver*>(session));
+      stream->reader_->SetObserver(dynamic_cast<FragmentObserver*>(session));
 
       // Set the session Changed to force new GetStreamInfo call from kodi -> addon
       // session->CheckChange(true);

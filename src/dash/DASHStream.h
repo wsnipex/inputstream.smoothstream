@@ -50,7 +50,7 @@ namespace dash
     DASHTree::AdaptationSet const *getAdaptation() { return current_adp_; };
     DASHTree::Representation const *getRepresentation(){ return current_rep_; };
     size_t getSegmentPos() { return current_rep_->segments_.pos(current_seg_); };
-    uint64_t GetLiveOffset() { return current_seg_ && tree_.isLive_ ? current_seg_->range_end_ : 0; }
+    uint64_t GetPTSOffset() { return current_seg_ ? current_seg_->range_end_ : 0; }
 
   protected:
     virtual bool download(const char* url){ return false; };
